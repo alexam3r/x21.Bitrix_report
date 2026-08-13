@@ -1,0 +1,14 @@
+# Реальные выгрузки отчётов — персональные данные сотрудников, не коммитить
+report.txt
+*.report.txt
+exports/
+
+# Локальные служебные каталоги
+.remember/
+.claude/
+node_modules/
+
+# Секреты и локальные конфиги (реальный webhookBaseUrl с токеном хранить только в n8n)
+.env
+*.local.json
+secrets*

@@ -1,0 +1,11 @@
+{
+  "name": "x21-bitrix-reports",
+  "version": "0.1.0",
+  "description": "Отчёты по задачам сотрудников из Bitrix24 для премирования (n8n + REST API)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "build:workflow": "node scripts/build-workflow.mjs"
+  }
+}

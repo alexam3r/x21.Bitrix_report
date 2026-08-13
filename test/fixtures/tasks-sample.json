@@ -1,0 +1,9 @@
+{
+  "_comment": "Упрощённый пример объектов задач из ответа tasks.task.list (result.tasks). Ключи camelCase, значения строками — как отдаёт API. Период фикстуры: август 2026.",
+  "tasks": [
+    { "id": "101", "title": "Договор с поставщиком", "responsibleId": "7", "accomplices": ["9"], "status": "5", "deadline": "2026-08-20T18:00:00+03:00", "closedDate": "2026-08-19T12:30:00+03:00", "createdDate": "2026-08-01T09:00:00+03:00" },
+    { "id": "102", "title": "Отчёт в бухгалтерию", "responsibleId": "7", "accomplices": [], "status": "3", "deadline": "2026-08-12T18:00:00+03:00", "closedDate": null, "createdDate": "2026-08-02T09:00:00+03:00" },
+    { "id": "103", "title": "Правки по сайту", "responsibleId": "9", "accomplices": ["7"], "status": "5", "deadline": "2026-08-05T18:00:00+03:00", "closedDate": "2026-08-25T10:00:00+03:00", "createdDate": "2026-07-20T09:00:00+03:00" },
+    { "id": "104", "title": "Разбор входящих (без срока)", "responsibleId": "9", "accomplices": [], "status": "5", "deadline": null, "closedDate": "2026-08-08T16:00:00+03:00", "createdDate": "2026-08-08T09:00:00+03:00" }
+  ]
+}
