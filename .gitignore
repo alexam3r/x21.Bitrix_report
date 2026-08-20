@@ -12,3 +12,6 @@ node_modules/
 .env
 *.local.json
 secrets*
+
+# Внутренние документы компании (Положение о премировании и т.п.)
+docs/*.docx
