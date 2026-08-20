@@ -24,27 +24,23 @@ const bundle = modules
 
 const glue = `
 // ===== n8n glue (Code node, Run Once for All Items) =====
+// Только расчёт. Отправкой занимаются следующие ноды workflow:
+// IF (гейт dryRun) → HTTP Request (im.message.add) и Send Email (messageHtml).
 const config = $input.first().json;
 const httpRequest = (opts) => this.helpers.httpRequest(opts);
 
 const res = await runReport({ config, httpRequest });
 
-// im.message.add возвращает ID созданного сообщения — это подтверждение доставки.
-let sentMessageId = null;
-if (!config.dryRun) {
-  const sendResp = await sendMessage(httpRequest, config.webhookBaseUrl, config.managerDialogId, res.message);
-  sentMessageId = sendResp && sendResp.result ? sendResp.result : null;
-}
-
 return [{ json: {
   period: res.period,
   tasksCount: res.tasksCount,
   historySkipped: res.historySkipped,
-  dialogId: res.dialogId,
-  sent: !config.dryRun,
-  sentMessageId,
   message: res.message,
   messageHtml: res.messageHtml,
+  // Проброс настроек для нод отправки.
+  dryRun: config.dryRun === true,
+  webhookBaseUrl: config.webhookBaseUrl,
+  managerDialogId: config.managerDialogId,
 } }];
 `;
 
@@ -96,10 +92,68 @@ const nodes = [
   {
     parameters: { mode: 'runOnceForAllItems', language: 'javaScript', jsCode },
     id: 'code-main',
-    name: 'Собрать отчёт и отправить',
+    name: 'Собрать отчёт',
     type: 'n8n-nodes-base.code',
     typeVersion: 2,
     position: [560, 200],
+  },
+  // Гейт сухого прогона: дальше проходим только при dryRun = false.
+  {
+    parameters: {
+      conditions: {
+        options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
+        conditions: [
+          {
+            id: 'if-dryrun-false',
+            leftValue: '={{ $json.dryRun }}',
+            rightValue: '',
+            operator: { type: 'boolean', operation: 'false', singleValue: true },
+          },
+        ],
+        combinator: 'and',
+      },
+      options: {},
+    },
+    id: 'if-send',
+    name: 'Отправлять? (dryRun = false)',
+    type: 'n8n-nodes-base.if',
+    typeVersion: 2.2,
+    position: [840, 200],
+  },
+  // Отправка в личку руководителю. Выход ноды = ответ im.message.add:
+  // поле result с ID сообщения — это и есть подтверждение доставки.
+  {
+    parameters: {
+      method: 'POST',
+      url: '={{ $json.webhookBaseUrl }}/im.message.add.json',
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: '={{ JSON.stringify({ DIALOG_ID: $json.managerDialogId, MESSAGE: $json.message }) }}',
+      options: {},
+    },
+    id: 'send-im',
+    name: 'В личку Bitrix (im.message.add)',
+    type: 'n8n-nodes-base.httpRequest',
+    typeVersion: 4.2,
+    position: [1120, 100],
+  },
+  // Дубль отчёта на email. Выключена: SMTP-креденшелы не экспортируются в JSON —
+  // после импорта выберите креденшелы, заполните адреса и включите ноду.
+  {
+    parameters: {
+      fromEmail: '',
+      toEmail: '',
+      subject: '=Отчёт по задачам — {{ $json.period.label }}',
+      emailFormat: 'html',
+      html: '={{ $json.messageHtml }}',
+      options: {},
+    },
+    id: 'send-email',
+    name: 'Отчёт на email (SMTP)',
+    type: 'n8n-nodes-base.emailSend',
+    typeVersion: 2.1,
+    position: [1120, 300],
+    disabled: true,
   },
 ];
 
@@ -107,8 +161,18 @@ const connections = {
   'Запуск вручную': { main: [[{ node: 'Настройки: месяц', type: 'main', index: 0 }]] },
   'Ежемесячно (1-е, 06:00)': { main: [[{ node: 'Настройки: месяц', type: 'main', index: 0 }]] },
   'Ежеквартально (1 янв/апр/июл/окт, 07:00)': { main: [[{ node: 'Настройки: квартал', type: 'main', index: 0 }]] },
-  'Настройки: месяц': { main: [[{ node: 'Собрать отчёт и отправить', type: 'main', index: 0 }]] },
-  'Настройки: квартал': { main: [[{ node: 'Собрать отчёт и отправить', type: 'main', index: 0 }]] },
+  'Настройки: месяц': { main: [[{ node: 'Собрать отчёт', type: 'main', index: 0 }]] },
+  'Настройки: квартал': { main: [[{ node: 'Собрать отчёт', type: 'main', index: 0 }]] },
+  'Собрать отчёт': { main: [[{ node: 'Отправлять? (dryRun = false)', type: 'main', index: 0 }]] },
+  'Отправлять? (dryRun = false)': {
+    main: [
+      [
+        { node: 'В личку Bitrix (im.message.add)', type: 'main', index: 0 },
+        { node: 'Отчёт на email (SMTP)', type: 'main', index: 0 },
+      ],
+      [],
+    ],
+  },
 };
 
 const workflow = {

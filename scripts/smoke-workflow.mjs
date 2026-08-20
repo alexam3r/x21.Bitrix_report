@@ -86,17 +86,19 @@ try {
 
 const res = out[0].json;
 console.log('period:', res.period.label);
-console.log('tasksCount:', res.tasksCount, '| sent:', res.sent);
-console.log('sent messages:', sent.length, '| DIALOG_ID:', sent[0]?.DIALOG_ID);
+console.log('tasksCount:', res.tasksCount, '| dryRun:', res.dryRun);
 console.log('--- message ---');
 console.log(res.message);
 
 // Проверка 3: базовые ожидания.
 const assert = (cond, msg) => { if (!cond) throw new Error(`SMOKE FAIL: ${msg}`); };
 assert(res.period.label === 'Июль 2026', 'период должен быть Июль 2026');
-assert(res.sent === true, 'sent должно быть true при dryRun=false');
-assert(sent.length === 1 && sent[0].DIALOG_ID === 42, 'должно уйти 1 сообщение на DIALOG_ID 42');
-assert(res.sentMessageId === 12345, 'sentMessageId должен вернуться из im.message.add');
+// Отправка вынесена из Code-ноды в отдельные ноды — сам расчёт слать не должен.
+assert(sent.length === 0, 'Code-нода НЕ должна отправлять сообщения сама');
+// Данные для следующих нод (HTTP Request → личка, Send Email) пробрасываются.
+assert(res.dryRun === false, 'dryRun пробрасывается для IF-ноды');
+assert(res.managerDialogId === 42, 'managerDialogId пробрасывается для HTTP-ноды');
+assert(typeof res.webhookBaseUrl === 'string' && res.webhookBaseUrl.length > 0, 'webhookBaseUrl пробрасывается для HTTP-ноды');
 assert(/Иванов/.test(res.message) && /Петров/.test(res.message), 'в отчёте оба сотрудника');
 // Фаза 2: время (5400с у Иванова) и перенос дедлайна (задача 102 → Петров).
 assert(/⏱ 1\.5ч/.test(res.message), 'у Иванова должно быть время 1.5ч');
@@ -106,4 +108,20 @@ assert(/<table/.test(res.messageHtml), 'должен быть HTML-вариан�
 assert(/Иванов.*Кид 1 → премия 10%/.test(res.message), 'у Иванова Кид 1 → премия 10%');
 assert(/Петров.*Кид 0 → премия 0%/.test(res.message), 'у Петрова Кид 0 → премия 0%');
 assert(/Кид/.test(res.messageHtml), 'в HTML-таблице есть колонка Кид');
+
+// Проверка 4: структура workflow — отправка отдельными нодами за IF (dryRun).
+const ifNode = wf.nodes.find((n) => n.type === 'n8n-nodes-base.if');
+assert(ifNode, 'должна быть IF-нода (гейт dryRun)');
+const httpNode = wf.nodes.find((n) => n.type === 'n8n-nodes-base.httpRequest');
+assert(httpNode, 'должна быть HTTP Request нода отправки в личку');
+assert(/im\.message\.add/.test(httpNode.parameters.url), 'HTTP-нода должна звать im.message.add');
+const emailNode = wf.nodes.find((n) => n.type === 'n8n-nodes-base.emailSend');
+assert(emailNode, 'должна быть Send Email нода');
+assert(emailNode.disabled === true, 'Email-нода выключена по умолчанию (нет креденшелов в JSON)');
+assert(/messageHtml/.test(emailNode.parameters.html), 'Email-нода шлёт messageHtml');
+// Связи: code → IF; IF(true) → HTTP и Email.
+const codeOut = wf.connections[codeNode.name].main[0].map((c) => c.node);
+assert(codeOut.includes(ifNode.name), 'Code-нода соединена с IF');
+const ifTrue = wf.connections[ifNode.name].main[0].map((c) => c.node);
+assert(ifTrue.includes(httpNode.name) && ifTrue.includes(emailNode.name), 'IF(true) ведёт на отправку в личку и email');
 console.log('\n✅ SMOKE OK');
