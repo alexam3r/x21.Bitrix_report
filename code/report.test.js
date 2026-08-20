@@ -104,6 +104,38 @@ test('buildReport: старые строки без полей времени/п
   assert.match(msg, /Иванов/);
 });
 
+test('buildReport: Кид и премия в строке сотрудника, возвраты при наличии', () => {
+  const withKid = [
+    { ...rows[0], kid: 0.77, returns: 2 },
+    { ...rows[1], kid: 1, returns: 0 },
+  ];
+  const msg = buildReport(withKid, period);
+  const ivanovLine = msg.split('\n').find((l) => l.includes('Иванов'));
+  const petrovLine = msg.split('\n').find((l) => l.includes('Петров'));
+  assert.match(ivanovLine, /возвраты 2/);
+  assert.match(ivanovLine, /Кид 0\.77 → премия 7\.7%/);
+  assert.doesNotMatch(petrovLine, /возвраты/);
+  assert.match(petrovLine, /Кид 1 → премия 10%/);
+});
+
+test('buildReport: строки без поля kid (старый формат) не показывают Кид', () => {
+  const msg = buildReport(rows, period);
+  assert.doesNotMatch(msg, /Кид/);
+});
+
+test('buildReportHtml: колонки Возвраты и Кид (премия)', () => {
+  const withKid = [
+    { ...rows[0], kid: 0.77, returns: 2 },
+    { ...rows[1], kid: 1, returns: 0 },
+  ];
+  const html = buildReportHtml(withKid, period);
+  assert.match(html, /Возвраты/);
+  assert.match(html, /Кид/);
+  assert.match(html, /0\.77/);
+  assert.match(html, /7\.7%/);
+  assert.match(html, /10%/);
+});
+
 test('buildReportHtml: таблица с сотрудниками, без неактивных', () => {
   const withIdle = [
     { ...rows[0], timeSpentSeconds: 5400, deadlineShifts: 1, tasksRescheduled: 1 },

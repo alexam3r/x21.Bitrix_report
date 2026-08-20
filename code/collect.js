@@ -110,21 +110,36 @@ function countPostponements(entries) {
   return n;
 }
 
-// История дедлайнов по списку задач (по одному запросу на задачу — дорого,
-// поэтому есть верхний предел maxTasks; остаток честно возвращаем как skipped).
-async function fetchDeadlineShifts(httpRequest, base, taskIds, maxTasks) {
+// Возвраты на доработку за период (Звозв из Положения о премировании):
+// переход СТАТУСА из «ждёт контроля» (4) или «завершена» (5) обратно в работу
+// (2/3), случившийся в расчётном периоде.
+function countReturns(entries, period) {
+  let n = 0;
+  for (const e of entries) {
+    if (e.field !== 'STATUS') continue;
+    const from = Number(e.value && e.value.from);
+    const to = Number(e.value && e.value.to);
+    if ((from === 4 || from === 5) && (to === 2 || to === 3) && inPeriod(e.createdDate, period)) n += 1;
+  }
+  return n;
+}
+
+// История по списку задач: один запрос на задачу БЕЗ фильтра по полю — из одного
+// ответа считаем и переносы дедлайнов, и возвраты на доработку. Дорого, поэтому
+// есть верхний предел maxTasks; остаток честно возвращаем как skipped.
+async function fetchTaskHistory(httpRequest, base, taskIds, maxTasks, period) {
   const shiftsByTaskId = {};
+  const returnsByTaskId = {};
   const scanned = taskIds.slice(0, maxTasks);
   for (const taskId of scanned) {
-    const resp = await callMethod(httpRequest, base, 'tasks.task.history.list', {
-      taskId,
-      filter: { FIELD: 'DEADLINE' },
-    });
+    const resp = await callMethod(httpRequest, base, 'tasks.task.history.list', { taskId });
     const list = resp && resp.result && Array.isArray(resp.result.list) ? resp.result.list : [];
-    const n = countPostponements(list);
-    if (n > 0) shiftsByTaskId[taskId] = n;
+    const shifts = countPostponements(list);
+    if (shifts > 0) shiftsByTaskId[taskId] = shifts;
+    const returns = countReturns(list, period);
+    if (returns > 0) returnsByTaskId[taskId] = returns;
   }
-  return { shiftsByTaskId, skipped: taskIds.length - scanned.length };
+  return { shiftsByTaskId, returnsByTaskId, skipped: taskIds.length - scanned.length };
 }
 
 async function fetchTasks(httpRequest, base, filter) {
@@ -172,22 +187,28 @@ export async function runReport({ config, httpRequest, now = new Date() }) {
       ? {}
       : await fetchTimeByUser(httpRequest, config.webhookBaseUrl, period);
 
-  // Фаза 2: переносы дедлайнов из истории задач с дедлайном в периоде.
+  // Фазы 2/3: переносы дедлайнов и возвраты на доработку из истории задач.
+  // При лимите приоритет — задачам с дедлайном в периоде (они дают Кид),
+  // затем остальные (закрытые в периоде — по ним могли быть возвраты).
   let deadlineShiftsByTaskId = {};
+  let returnsByTaskId = {};
   let historySkipped = 0;
   if (config.collectDeadlineShifts !== false) {
-    const dueTaskIds = tasks.filter((t) => inPeriod(t.deadline, period)).map((t) => t.id);
-    const { shiftsByTaskId, skipped } = await fetchDeadlineShifts(
+    const dueIds = tasks.filter((t) => inPeriod(t.deadline, period)).map((t) => t.id);
+    const restIds = tasks.filter((t) => !inPeriod(t.deadline, period)).map((t) => t.id);
+    const history = await fetchTaskHistory(
       httpRequest,
       config.webhookBaseUrl,
-      dueTaskIds,
+      [...dueIds, ...restIds],
       config.maxHistoryTasks || 300,
+      period,
     );
-    deadlineShiftsByTaskId = shiftsByTaskId;
-    historySkipped = skipped;
+    deadlineShiftsByTaskId = history.shiftsByTaskId;
+    returnsByTaskId = history.returnsByTaskId;
+    historySkipped = history.skipped;
   }
 
-  const rows = aggregate({ users, tasks, period, timeSecondsByUser, deadlineShiftsByTaskId });
+  const rows = aggregate({ users, tasks, period, timeSecondsByUser, deadlineShiftsByTaskId, returnsByTaskId });
   const message = buildReport(rows, period);
   const messageHtml = buildReportHtml(rows, period);
 

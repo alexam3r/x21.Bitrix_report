@@ -13,6 +13,12 @@ export function formatHours(seconds) {
   return `${h}ч`;
 }
 
+// «Кид 0.77 → премия 7.7%»: премия = 10% оклада × Кид (Положение, п. 3.3).
+export function formatKid(kid) {
+  const premium = Math.round(kid * 100) / 10; // 0.77 → 7.7, 1 → 10
+  return `Кид ${kid} → премия ${premium}%`;
+}
+
 function sum(rows, path) {
   return rows.reduce((acc, r) => acc + (r.responsible[path] || 0), 0);
 }
@@ -72,10 +78,12 @@ export function buildReport(allRows, period) {
     const noDl = resp.noDeadline > 0 ? `, без срока ${resp.noDeadline}` : '';
     const time = r.timeSpentSeconds > 0 ? `, ⏱ ${formatHours(r.timeSpentSeconds)}` : '';
     const shifts = r.deadlineShifts > 0 ? `, переносы ${r.deadlineShifts}` : '';
+    const returns = r.returns > 0 ? `, возвраты ${r.returns}` : '';
+    const kid = r.kid !== undefined ? `, ${formatKid(r.kid)}` : '';
     lines.push(
       `${flag}${r.name}: выполнено ${resp.completed} (${part.completed}), ` +
         `в срок ${resp.onTime}/${resp.due} = ${formatRate(resp.completionRate)}, ` +
-        `просрочено ${resp.overdue}${noDl}${time}${shifts}`,
+        `просрочено ${resp.overdue}${noDl}${time}${shifts}${returns}${kid}`,
     );
   }
 
@@ -102,11 +110,13 @@ export function buildReportHtml(allRows, period) {
 
   const header =
     '<tr><th align="left">Сотрудник</th><th>Выполнено</th><th>В срок</th><th>%</th>' +
-    '<th>Просрочено</th><th>Без срока</th><th>Время</th><th>Переносы</th></tr>';
+    '<th>Просрочено</th><th>Без срока</th><th>Время</th><th>Переносы</th>' +
+    '<th>Возвраты</th><th>Кид (премия)</th></tr>';
 
   const body = sortRows(rows)
     .map((r) => {
       const resp = r.responsible;
+      const kidCell = r.kid !== undefined ? `${r.kid} (${Math.round(r.kid * 100) / 10}%)` : '';
       return (
         `<tr><td>${esc(r.name)}</td>` +
         `<td align="center">${resp.completed} (${r.participation.completed})</td>` +
@@ -115,7 +125,9 @@ export function buildReportHtml(allRows, period) {
         `<td align="center">${resp.overdue}</td>` +
         `<td align="center">${resp.noDeadline || ''}</td>` +
         `<td align="center">${r.timeSpentSeconds > 0 ? formatHours(r.timeSpentSeconds) : ''}</td>` +
-        `<td align="center">${r.deadlineShifts > 0 ? r.deadlineShifts : ''}</td></tr>`
+        `<td align="center">${r.deadlineShifts > 0 ? r.deadlineShifts : ''}</td>` +
+        `<td align="center">${r.returns > 0 ? r.returns : ''}</td>` +
+        `<td align="center">${kidCell}</td></tr>`
       );
     })
     .join('');

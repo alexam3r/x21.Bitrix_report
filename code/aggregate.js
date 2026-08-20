@@ -54,6 +54,16 @@ export function classifyTask(task, period) {
   return { completedInPeriod, deadlineInPeriod, onTime, overdue, noDeadline };
 }
 
+// Кид — коэффициент исполнительской дисциплины (Положение о доп. премировании,
+// п. 4.3–4.5): Кид = Зсрок/Зплан − 0,3 × Звозв/Зплан, пределы [0, 1];
+// при Зплан = 0 → Кид = 1. Округление до 2 знаков — как в примере п. 4.4.
+export function computeKid({ zplan, zsrok, zvozv }) {
+  if (!zplan) return 1;
+  const raw = zsrok / zplan - 0.3 * (zvozv / zplan);
+  const clamped = Math.min(1, Math.max(0, raw));
+  return Math.round(clamped * 100) / 100;
+}
+
 function emptyBucket() {
   return { completed: 0, due: 0, onTime: 0, overdue: 0, noDeadline: 0 };
 }
@@ -76,14 +86,16 @@ function withRate(bucket) {
 // Основная функция: раскладывает задачи по сотрудникам и считает метрики.
 // Вход: { users: [{id, name}], tasks: [normalizedTask], period: {start, end},
 //   timeSecondsByUser?: {userId: seconds}   — учтённое время (task.elapseditem),
-//   deadlineShiftsByTaskId?: {taskId: n}    — число переносов дедлайна по задаче }.
+//   deadlineShiftsByTaskId?: {taskId: n}    — число переносов дедлайна по задаче,
+//   returnsByTaskId?: {taskId: n}           — возвраты на доработку за период }.
 // Выход: массив по каждому сотруднику с разрезами responsible и participation.
-export function aggregate({ users, tasks, period, timeSecondsByUser = {}, deadlineShiftsByTaskId = {} }) {
+export function aggregate({ users, tasks, period, timeSecondsByUser = {}, deadlineShiftsByTaskId = {}, returnsByTaskId = {} }) {
   return users.map((user) => {
     const responsible = emptyBucket();
     const participation = emptyBucket();
     let deadlineShifts = 0;
     let tasksRescheduled = 0;
+    let returns = 0;
 
     for (const task of tasks) {
       const isResponsible = task.responsibleId === user.id;
@@ -96,12 +108,13 @@ export function aggregate({ users, tasks, period, timeSecondsByUser = {}, deadli
       // «Как исполнитель» — только где сотрудник RESPONSIBLE_ID.
       if (isResponsible) {
         addToBucket(responsible, c);
-        // Переносы дедлайна атрибуцируются исполнителю задачи.
+        // Переносы дедлайна и возвраты атрибуцируются исполнителю задачи.
         const shifts = deadlineShiftsByTaskId[task.id] || 0;
         if (shifts > 0) {
           deadlineShifts += shifts;
           tasksRescheduled += 1;
         }
+        returns += returnsByTaskId[task.id] || 0;
       }
     }
 
@@ -113,6 +126,9 @@ export function aggregate({ users, tasks, period, timeSecondsByUser = {}, deadli
       timeSpentSeconds: timeSecondsByUser[user.id] || 0,
       deadlineShifts,
       tasksRescheduled,
+      returns,
+      // Кид по Положению: Зплан = due, Зсрок = onTime (как исполнитель).
+      kid: computeKid({ zplan: responsible.due, zsrok: responsible.onTime, zvozv: returns }),
     };
   });
 }

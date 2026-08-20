@@ -6,6 +6,7 @@ import {
   classifyTask,
   normalizeTask,
   aggregate,
+  computeKid,
   STATUS,
 } from './aggregate.js';
 
@@ -219,4 +220,57 @@ test('aggregate: задачи чужих пользователей игнори
   ];
   const res = aggregate({ users, tasks, period: AUG });
   for (const r of res) assert.equal(r.responsible.completed, 0);
+});
+
+// ── computeKid: коэффициент исполнительской дисциплины (Положение, п. 4.3–4.5) ──
+test('computeKid: пример из Положения п. 4.4 (20/16/2 → 0.77)', () => {
+  assert.equal(computeKid({ zplan: 20, zsrok: 16, zvozv: 2 }), 0.77);
+});
+
+test('computeKid: Зплан = 0 → Кид = 1 (п. 4.5)', () => {
+  assert.equal(computeKid({ zplan: 0, zsrok: 0, zvozv: 0 }), 1);
+});
+
+test('computeKid: не опускается ниже 0', () => {
+  // 0/2 − 0.3 × 10/2 = −1.5 → 0
+  assert.equal(computeKid({ zplan: 2, zsrok: 0, zvozv: 10 }), 0);
+});
+
+test('computeKid: не поднимается выше 1', () => {
+  assert.equal(computeKid({ zplan: 2, zsrok: 3, zvozv: 0 }), 1);
+});
+
+test('computeKid: всё в срок без возвратов → 1', () => {
+  assert.equal(computeKid({ zplan: 5, zsrok: 5, zvozv: 0 }), 1);
+});
+
+test('aggregate: возвраты атрибуцируются исполнителю, Кид в строке', () => {
+  const tasks = [
+    // Иванов: 2 с дедлайном в периоде, 1 в срок, 1 просрочена; 1 возврат
+    { id: 1, responsibleId: 7, accomplices: [9], status: STATUS.DONE, deadline: '2026-08-20T18:00:00+03:00', closedDate: '2026-08-19T10:00:00+03:00' },
+    { id: 2, responsibleId: 7, accomplices: [], status: 3, deadline: '2026-08-10T18:00:00+03:00', closedDate: null },
+    // Петров: без задач с дедлайном → Кид = 1
+  ];
+  const res = aggregate({
+    users, tasks, period: AUG,
+    returnsByTaskId: { 1: 1 },
+  });
+  const ivanov = res.find((r) => r.userId === 7);
+  const petrov = res.find((r) => r.userId === 9);
+
+  assert.equal(ivanov.returns, 1);
+  // Кид = 1/2 − 0.3 × 1/2 = 0.35
+  assert.equal(ivanov.kid, 0.35);
+
+  // Возврат по задаче 1 НЕ достаётся соисполнителю Петрову
+  assert.equal(petrov.returns, 0);
+  assert.equal(petrov.kid, 1); // Зплан = 0
+});
+
+test('aggregate: без returnsByTaskId строки получают returns 0 и Кид считается', () => {
+  const res = aggregate({ users, tasks: [], period: AUG });
+  for (const r of res) {
+    assert.equal(r.returns, 0);
+    assert.equal(r.kid, 1);
+  }
 });

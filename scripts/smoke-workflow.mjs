@@ -102,4 +102,8 @@ assert(/Иванов/.test(res.message) && /Петров/.test(res.message), 'в
 assert(/⏱ 1\.5ч/.test(res.message), 'у Иванова должно быть время 1.5ч');
 assert(/переносы 1/.test(res.message), 'у Петрова должен быть 1 перенос');
 assert(/<table/.test(res.messageHtml), 'должен быть HTML-вариант отчёта');
+// Фаза 3 (Кид): Иванов 1/1 в срок → Кид 1; Петров 0/1 → Кид 0.
+assert(/Иванов.*Кид 1 → премия 10%/.test(res.message), 'у Иванова Кид 1 → премия 10%');
+assert(/Петров.*Кид 0 → премия 0%/.test(res.message), 'у Петрова Кид 0 → премия 0%');
+assert(/Кид/.test(res.messageHtml), 'в HTML-таблице есть колонка Кид');
 console.log('\n✅ SMOKE OK');

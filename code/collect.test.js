@@ -153,6 +153,83 @@ test('runReport: переносы дедлайнов считаются из и�
   assert.equal(petrov.deadlineShifts, 0);
 });
 
+test('runReport: возвраты на доработку считаются из истории статусов за период', async () => {
+  const deadlineTasks = [
+    { id: '101', responsibleId: '7', accomplices: ['9'], status: '3', deadline: '2026-08-20T18:00:00+03:00', closedDate: null },
+  ];
+  const historyByTask = {
+    101: [
+      // отправка на контроль — НЕ возврат
+      { id: '1', field: 'STATUS', value: { from: '2', to: '4' }, createdDate: '2026-08-05T10:00:00+03:00' },
+      // возврат с контроля в работу — возврат ✓
+      { id: '2', field: 'STATUS', value: { from: '4', to: '2' }, createdDate: '2026-08-06T10:00:00+03:00' },
+      // переоткрытие завершённой задачи — тоже возврат ✓
+      { id: '3', field: 'STATUS', value: { from: '5', to: '2' }, createdDate: '2026-08-07T10:00:00+03:00' },
+      // возврат ВНЕ расчётного периода — не считается
+      { id: '4', field: 'STATUS', value: { from: '4', to: '2' }, createdDate: '2026-07-06T10:00:00+03:00' },
+    ],
+  };
+  const { http, calls } = makeHttp({
+    users: [{ ID: '7', NAME: 'Иван', LAST_NAME: 'Иванов' }, { ID: '9', NAME: 'Пётр', LAST_NAME: 'Петров' }],
+    closedTasks: [],
+    deadlineTasks,
+    historyByTask,
+  });
+  const res = await runReport({ config, httpRequest: http });
+  const ivanov = res.rows.find((r) => r.userId === 7);
+  const petrov = res.rows.find((r) => r.userId === 9);
+
+  assert.equal(ivanov.returns, 2);
+  // Кид: Зплан=1, Зсрок=0, Звозв=2 → 0/1 − 0.3×2/1 = −0.6 → 0
+  assert.equal(ivanov.kid, 0);
+  // Возвраты не достаются соисполнителю
+  assert.equal(petrov.returns, 0);
+
+  // История запрашивается БЕЗ фильтра по полю: один запрос даёт и DEADLINE, и STATUS
+  const historyCalls = calls.filter((c) => c.url.includes('history'));
+  assert.ok(historyCalls.length > 0);
+  for (const c of historyCalls) {
+    assert.equal(c.body.filter?.FIELD, undefined);
+  }
+});
+
+test('runReport: история сканирует и закрытые в периоде задачи без дедлайна в периоде', async () => {
+  const closedTasks = [
+    { id: '201', responsibleId: '7', accomplices: [], status: '5', deadline: null, closedDate: '2026-08-10T12:00:00+03:00' },
+  ];
+  const historyByTask = {
+    201: [{ id: '1', field: 'STATUS', value: { from: '5', to: '2' }, createdDate: '2026-08-09T10:00:00+03:00' }],
+  };
+  const { http, calls } = makeHttp({
+    users: [{ ID: '7', NAME: 'Иван', LAST_NAME: 'Иванов' }],
+    closedTasks,
+    deadlineTasks: [],
+    historyByTask,
+  });
+  const res = await runReport({ config, httpRequest: http });
+  assert.equal(res.rows.find((r) => r.userId === 7).returns, 1);
+  assert.ok(calls.some((c) => c.url.includes('history') && String(c.body.taskId) === '201'));
+});
+
+test('runReport: при лимите истории задачи с дедлайном в периоде сканируются первыми', async () => {
+  const closedTasks = [
+    { id: '201', responsibleId: '7', accomplices: [], status: '5', deadline: null, closedDate: '2026-08-10T12:00:00+03:00' },
+  ];
+  const deadlineTasks = [
+    { id: '101', responsibleId: '7', accomplices: [], status: '3', deadline: '2026-08-20T18:00:00+03:00', closedDate: null },
+  ];
+  const { http, calls } = makeHttp({
+    users: [{ ID: '7', NAME: 'Иван', LAST_NAME: 'Иванов' }],
+    closedTasks,
+    deadlineTasks,
+  });
+  const res = await runReport({ config: { ...config, maxHistoryTasks: 1 }, httpRequest: http });
+  const historyCalls = calls.filter((c) => c.url.includes('history'));
+  assert.equal(historyCalls.length, 1);
+  assert.equal(String(historyCalls[0].body.taskId), '101'); // дедлайновая — приоритет
+  assert.equal(res.historySkipped, 1);
+});
+
 test('runReport: collectTime/collectDeadlineShifts = false отключают доп. запросы', async () => {
   const { http, calls } = makeHttp({
     users: [{ ID: '7', NAME: 'Иван', LAST_NAME: 'Иванов' }],
